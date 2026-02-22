@@ -416,7 +416,7 @@ func TestFetchMessages_MessageContent(t *testing.T) {
 	}
 
 	msg := resp.Messages[0]
-	if msg.ConvertedMessage == nil || len(msg.ConvertedMessage.Parts) == 0 {
+	if msg.ConvertedMessage == nil || len(msg.Parts) == 0 {
 		t.Fatal("expected converted message with parts")
 	}
 }
@@ -460,7 +460,7 @@ func TestFetchMessages_ThreadPost(t *testing.T) {
 	}
 
 	// Reply should have ReplyTo set in the converted message.
-	if resp.Messages[1].ConvertedMessage.ReplyTo == nil {
+	if resp.Messages[1].ReplyTo == nil {
 		t.Error("reply should have ReplyTo set")
 	}
 }

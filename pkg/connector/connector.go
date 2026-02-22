@@ -525,7 +525,7 @@ func (mc *MattermostConnector) HandleReloadPuppets(w http.ResponseWriter, r *htt
 	var entries []PuppetEntry
 	if r.Body != nil && r.ContentLength != 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, maxReloadBodySize)
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)

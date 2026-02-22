@@ -343,7 +343,7 @@ func TestConvertedMessage_PartsAreConvertedMessagePart(t *testing.T) {
 		if part.Content == nil {
 			t.Error("part Content should not be nil")
 		}
-		var _ *bridgev2.ConvertedMessagePart = part
+		var _ = part
 	}
 }
 
