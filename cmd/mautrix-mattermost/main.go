@@ -1,5 +1,9 @@
 // Copyright 2024-2026 Aiku AI
 
+// Command mautrix-mattermost is a Matrix-Mattermost puppeting bridge built
+// on the mautrix bridgev2 framework. It translates messages between the two
+// platforms and supports per-user puppet identity routing so each Matrix user
+// can post to Mattermost under a dedicated bot account.
 package main
 
 import (

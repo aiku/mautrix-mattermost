@@ -289,6 +289,7 @@ func (m *MattermostClient) syncChannels(ctx context.Context) {
 	m.log.Info().Msg("Channel sync complete")
 }
 
+// Disconnect closes the WebSocket connection and stops the client's event loop.
 func (m *MattermostClient) Disconnect() {
 	m.stopOnce.Do(func() {
 		close(m.stopChan)
@@ -299,6 +300,7 @@ func (m *MattermostClient) Disconnect() {
 	}
 }
 
+// IsLoggedIn reports whether the client holds a valid authentication token.
 func (m *MattermostClient) IsLoggedIn() bool {
 	return m.client != nil && m.client.AuthToken != ""
 }
@@ -310,6 +312,7 @@ func (m *MattermostClient) LogoutRemote(ctx context.Context) {
 	m.Disconnect()
 }
 
+// IsThisUser reports whether the given network user ID matches this client's Mattermost user.
 func (m *MattermostClient) IsThisUser(_ context.Context, userID networkid.UserID) bool {
 	return string(userID) == m.userID
 }
