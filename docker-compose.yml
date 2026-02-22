@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: mattermost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mattermost:
+    image: mattermost/mattermost-team-edition:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:changeme@postgres:5432/mattermost?sslmode=disable
+      MM_SERVICESETTINGS_SITEURL: http://localhost:8065
+      MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION: "true"
+      MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS: "true"
+    ports:
+      - "8065:8065"
+    volumes:
+      - mattermost_data:/mattermost/data
+
+  synapse:
+    image: matrixdotorg/synapse:latest
+    depends_on:
+      - postgres
+    environment:
+      SYNAPSE_SERVER_NAME: localhost
+      SYNAPSE_REPORT_STATS: "no"
+    ports:
+      - "8008:8008"
+    volumes:
+      - synapse_data:/data
+      - ./registration.yaml:/data/appservices/mattermost.yaml:ro
+
+  mautrix-mattermost:
+    build: .
+    depends_on:
+      - mattermost
+      - synapse
+    command: ["-c", "/data/config.yaml"]
+    ports:
+      - "29319:29319"
+    volumes:
+      - ./config.yaml:/data/config.yaml:ro
+    environment:
+      # Auto-login (optional, for single-server setups)
+      MATTERMOST_AUTO_SERVER_URL: http://mattermost:8065
+      # MATTERMOST_AUTO_OWNER_MXID: "@admin:localhost"
+      # MATTERMOST_AUTO_TOKEN: "your-bot-token"
+
+      # Puppet identity mappings (add as many as needed)
+      # MATTERMOST_PUPPET_ALICE_MXID: "@alice:localhost"
+      # MATTERMOST_PUPPET_ALICE_TOKEN: "alice-bot-token"
+
+volumes:
+  postgres_data:
+  mattermost_data:
+  synapse_data:

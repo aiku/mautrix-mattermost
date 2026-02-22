@@ -1,0 +1,185 @@
+# Puppet System
+
+## Problem
+
+In a standard Matrix-Mattermost bridge using relay mode, all messages from Matrix users appear under a single "relay bot" account in Mattermost. The message content might include the original sender's name in the text, but the Mattermost post metadata (author, avatar, username) all point to the same relay bot.
+
+This is unacceptable for deployments where multiple Matrix users each need a distinct Mattermost identity -- for example, when separate bot accounts represent different services or team members.
+
+## Solution
+
+The puppet system maps each Matrix user (identified by MXID) to a dedicated Mattermost bot account. When a Matrix user sends a message, the bridge looks up their MXID in the puppet map and posts the message using that bot's API token instead of the relay bot.
+
+From Mattermost's perspective, each puppet appears as a separate user with its own username, display name, and avatar.
+
+## Configuration
+
+### Environment Variables
+
+Each puppet requires two environment variables (and one optional):
+
+```
+MATTERMOST_PUPPET_{SLUG}_MXID   = @bot-name:example.com
+MATTERMOST_PUPPET_{SLUG}_TOKEN  = <mattermost bot access token>
+MATTERMOST_PUPPET_{SLUG}_URL    = http://mattermost:8065  (optional)
+```
+
+Where `{SLUG}` is an arbitrary uppercase identifier with underscores. The bridge scans all environment variables matching `MATTERMOST_PUPPET_*_MXID` at startup.
+
+**Naming convention**: Convert the puppet's identifier to uppercase and replace hyphens with underscores. For example, a puppet for `@my-bot:example.com` might use slug `MY_BOT`.
+
+The `_URL` variable is optional and defaults to the bridge's configured `server_url`. Use it when a puppet needs to connect to a different Mattermost server.
+
+### Examples
+
+```bash
+# A service bot
+MATTERMOST_PUPPET_SERVICE_BOT_MXID=@service-bot:example.com
+MATTERMOST_PUPPET_SERVICE_BOT_TOKEN=abc123token
+
+# An integration
+MATTERMOST_PUPPET_GITHUB_MXID=@github-bridge:example.com
+MATTERMOST_PUPPET_GITHUB_TOKEN=def456token
+```
+
+## Resolution Algorithm
+
+When a Matrix message arrives, `resolvePostClient()` in `handlematrix.go` performs a 3-path lookup to determine which Mattermost client to use for posting:
+
+### Path 1: origSender (relay metadata)
+
+```go
+if origSender != nil {
+    if puppet, ok := m.connector.Puppets[origSender.UserID]; ok {
+        return puppet.Client, puppet.UserID
+    }
+}
+```
+
+The bridgev2 framework sets `origSender` on relayed messages -- messages from Matrix users who are not directly logged into the bridge. This is the primary path for puppet resolution. When a non-logged-in Matrix user sends a message in a bridged room, the framework wraps it as a relay event and populates `origSender` with the original Matrix user's identity.
+
+### Path 2: evt.Sender (direct event sender)
+
+```go
+if evt != nil && evt.Sender != "" {
+    if puppet, ok := m.connector.Puppets[evt.Sender]; ok {
+        return puppet.Client, puppet.UserID
+    }
+}
+```
+
+This covers cases where the Matrix event sender is not wrapped in relay metadata. This can happen with certain event types or when the bridge framework processes events differently. Without this check, directly-sent events from a puppet user would fall through to the relay bot.
+
+### Path 3: Relay fallback
+
+```go
+return m.client, m.userID
+```
+
+If neither path matches a puppet, the message is posted using the bridge's relay bot account. This is the normal behavior for Matrix users who don't have a puppet configured.
+
+## Hot-Reload
+
+Puppets can be added, removed, or updated without restarting the bridge.
+
+### Via Admin API
+
+```bash
+# Reload from environment variables
+curl -X POST http://localhost:29320/api/reload-puppets
+
+# Reload from explicit JSON
+curl -X POST http://localhost:29320/api/reload-puppets \
+  -H 'Content-Type: application/json' \
+  -d '[
+    {"slug": "BOT_A", "mxid": "@bot-a:example.com", "token": "token-a"},
+    {"slug": "BOT_B", "mxid": "@bot-b:example.com", "token": "token-b"}
+  ]'
+```
+
+Response:
+
+```json
+{"added": 2, "removed": 0, "total": 5}
+```
+
+When using JSON body, the provided list becomes the **desired state**. Puppets in the current map but absent from the JSON are removed. Puppets with unchanged tokens are kept as-is (no re-authentication).
+
+When the body is empty, the bridge re-scans environment variables.
+
+### Reload Behavior
+
+1. Build desired puppet set from input (JSON body or env vars)
+2. Acquire write lock on puppet map
+3. Remove puppets not in desired set
+4. For each desired puppet:
+   - If already loaded with same token: skip (no-op)
+   - Otherwise: create new Mattermost API client, verify token via `GetMe()`, add to map
+5. Release lock
+6. Log summary: added, removed, total
+
+Failed authentications during reload are logged and skipped -- they do not prevent other puppets from loading.
+
+## WatchNewPortals
+
+The bridgev2 framework requires a relay login to be set on each portal (bridged room) before it will call `HandleMatrixMessage`. Without relay, messages from non-logged-in users are rejected with "not logged in" before the puppet system is reached.
+
+`WatchNewPortals` solves this for rooms created after startup:
+
+1. Runs as a background goroutine with a configurable interval (default 60 seconds)
+2. Each tick: fetches all portals with an MXID, checks if relay is set
+3. For portals without relay: finds the first available user login and sets it as relay
+4. Logs how many portals were updated
+
+This is necessary because:
+- The initial `autoSetRelay` only runs 3 times after boot
+- New Mattermost channels can be created at any time
+- When a new channel is bridged, the resulting portal needs relay before puppet routing works
+
+## Thread Safety
+
+The puppet map (`MattermostConnector.Puppets`) is accessed from multiple goroutines:
+
+- **Read path**: `resolvePostClient` and `IsPuppetUserID` during message handling
+- **Write path**: `ReloadPuppetsFromEntries` during hot-reload
+
+Access is protected by `sync.RWMutex` (`puppetMu`). Read operations use `RLock`/`RUnlock`, write operations use `Lock`/`Unlock`. This allows concurrent message handling while serializing reload operations.
+
+Note that the initial `loadPuppets` call during `Start()` does not lock because it runs before any goroutines are spawned.
+
+## Scaling
+
+The puppet system has been tested with 30+ concurrent puppets. Memory overhead per puppet is minimal:
+
+- One `*model.Client4` (Mattermost HTTP client)
+- Stored MXID, user ID, and username strings
+
+There is no per-puppet goroutine or WebSocket connection. All puppets share the bridge's single WebSocket connection for receiving events and use the main HTTP client pool for posting. The cost scales linearly with the number of puppets at approximately one small struct per puppet.
+
+## Setup Walkthrough
+
+1. **Create Mattermost bot accounts** for each Matrix user that needs a puppet identity. Use the Mattermost admin panel or API to create bot accounts and generate access tokens.
+
+2. **Set environment variables** before starting the bridge:
+   ```bash
+   export MATTERMOST_PUPPET_ALICE_MXID="@alice:example.com"
+   export MATTERMOST_PUPPET_ALICE_TOKEN="<alice-bot-token>"
+   export MATTERMOST_PUPPET_BOB_MXID="@bob:example.com"
+   export MATTERMOST_PUPPET_BOB_TOKEN="<bob-bot-token>"
+   ```
+
+3. **Start the bridge**. On startup, the bridge scans for `MATTERMOST_PUPPET_*_MXID` variables, verifies each token, and logs loaded puppets:
+   ```
+   Loaded puppet client  puppet=ALICE mxid=@alice:example.com mm_username=alice-bot
+   Loaded puppet client  puppet=BOB mxid=@bob:example.com mm_username=bob-bot
+   ```
+
+4. **Verify puppet routing**. Send a message from `@alice:example.com` in a bridged Matrix room. It should appear in Mattermost under `alice-bot`, not the relay bot.
+
+5. **Add more puppets at runtime** using the admin API:
+   ```bash
+   curl -X POST http://localhost:29320/api/reload-puppets \
+     -H 'Content-Type: application/json' \
+     -d '[{"slug":"CAROL","mxid":"@carol:example.com","token":"<carol-token>"}]'
+   ```
+   Note: when using JSON reload, include ALL desired puppets in the request, not just new ones.
