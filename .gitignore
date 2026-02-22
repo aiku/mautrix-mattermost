@@ -45,4 +45,5 @@ build/
 
 # Claude Code local artifacts
 .claude/security-review-stamp
+.claude/lint-stamp
 .claude/settings.local.json

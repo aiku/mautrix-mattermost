@@ -2,9 +2,12 @@ Review the current codebase or staged changes for security issues using the secu
 
 Follow the Go Security Agent prompt in full:
 
-1. Run all security tools in order:
+1. Run all security and lint tools in order:
    ```
    go vet ./...
+   ```
+   ```
+   golangci-lint run ./...
    ```
    ```
    gosec ./...
@@ -35,8 +38,9 @@ Follow the Go Security Agent prompt in full:
 
 When reviewing or writing security-related code, follow the full standards in `.claude/agents/security-reviewer.md`.
 
-5. **Stamp file**: If the final verdict is **APPROVE**, create the security review stamp by running:
+5. **Stamp files**: If the final verdict is **APPROVE**, create both stamp files by running:
    ```
    touch .claude/security-review-stamp
+   touch .claude/lint-stamp
    ```
-   This stamp is checked by the pre-commit hook — commits are blocked until the stamp exists and is newer than all `.go` source files. If the verdict is REQUEST CHANGES or BLOCKING, do NOT create the stamp.
+   These stamps are checked by pre-commit hooks — commits are blocked until both stamps exist and are newer than all `.go` source files. If the verdict is REQUEST CHANGES or BLOCKING, do NOT create either stamp.
