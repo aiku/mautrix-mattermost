@@ -3,7 +3,15 @@ FROM golang:1.26-alpine AS builder
 ARG VERSION=unknown
 ARG COMMIT=unknown
 
-RUN apk add --no-cache gcc g++ musl-dev olm-dev
+RUN apk add --no-cache gcc g++ musl-dev cmake make git
+
+# Build libolm as a static library
+RUN git clone --depth 1 --branch 3.2.16 https://gitlab.matrix.org/matrix-org/olm.git /tmp/olm && \
+    cd /tmp/olm && \
+    cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && \
+    cmake --build build --parallel && \
+    cmake --install build && \
+    rm -rf /tmp/olm
 
 WORKDIR /app
 
@@ -12,6 +20,7 @@ RUN go mod download
 
 COPY . .
 RUN go build -ldflags "-s -w \
+    -linkmode external -extldflags '-static' \
     -X main.Tag=${VERSION} \
     -X main.Commit=${COMMIT} \
     -X 'main.BuildTime=$(date -Iseconds)'" \
@@ -22,10 +31,9 @@ FROM scratch AS binary
 COPY --from=builder /mautrix-mattermost /mautrix-mattermost
 
 # Runtime image
-FROM alpine:3.21 AS runtime
+FROM scratch AS runtime
 
-RUN apk add --no-cache ca-certificates olm
-
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /mautrix-mattermost /usr/bin/mautrix-mattermost
 
 VOLUME /data
