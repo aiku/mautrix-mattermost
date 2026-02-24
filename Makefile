@@ -43,11 +43,15 @@ vet:
 docker-build:
 	docker build -t ghcr.io/aiku/$(BINARY_NAME):$(VERSION) .
 	docker tag ghcr.io/aiku/$(BINARY_NAME):$(VERSION) ghcr.io/aiku/$(BINARY_NAME):latest
+	docker tag ghcr.io/aiku/$(BINARY_NAME):$(VERSION) remiphilippe/$(BINARY_NAME):$(VERSION)
+	docker tag ghcr.io/aiku/$(BINARY_NAME):$(VERSION) remiphilippe/$(BINARY_NAME):latest
 
-## docker-push: Push Docker image to ghcr.io
+## docker-push: Push Docker image to ghcr.io and Docker Hub
 docker-push: docker-build
 	docker push ghcr.io/aiku/$(BINARY_NAME):$(VERSION)
 	docker push ghcr.io/aiku/$(BINARY_NAME):latest
+	docker push remiphilippe/$(BINARY_NAME):$(VERSION)
+	docker push remiphilippe/$(BINARY_NAME):latest
 
 ## clean: Remove build artifacts
 clean:
