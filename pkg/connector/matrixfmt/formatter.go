@@ -1,4 +1,7 @@
-// Copyright 2024-2026 Aiku AI
+// Copyright 2024-2026 Remi Philippe
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Package matrixfmt converts Matrix HTML to Mattermost markdown.
 package matrixfmt

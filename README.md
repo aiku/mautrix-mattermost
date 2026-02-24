@@ -3,7 +3,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/aiku/mautrix-mattermost)](https://goreportcard.com/report/github.com/aiku/mautrix-mattermost)
 [![CI](https://github.com/aiku/mautrix-mattermost/actions/workflows/ci.yml/badge.svg)](https://github.com/aiku/mautrix-mattermost/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/aiku/mautrix-mattermost.svg)](https://pkg.go.dev/github.com/aiku/mautrix-mattermost)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](LICENSE)
 
 A Matrix-Mattermost bridge built on the [mautrix](https://github.com/mautrix/go) bridgev2 framework with **puppet identity routing** -- each Matrix user can post to Mattermost under their own dedicated bot account, preserving individual identity across platforms.
 
@@ -141,7 +141,7 @@ bridge:
 
 ### Puppet System
 
-The puppet identity system maps Matrix user IDs to Mattermost bot accounts via environment variables.
+The puppet identity system maps Matrix user IDs to Mattermost bot accounts via environment variables. For the full deployment guide — including Kubernetes setup, bulk provisioning, and programmatic hot-reload — see [doc/puppet-deployment-guide.md](doc/puppet-deployment-guide.md).
 
 #### Setup
 
@@ -215,17 +215,16 @@ make fmt
 ```
 .
 ├── cmd/
-│   └── mautrix-mattermost/    # CLI entrypoint
+│   └── mautrix-mattermost/        # CLI entrypoint
 ├── pkg/
-│   ├── connector/              # bridgev2 NetworkConnector implementation
-│   ├── matterclient/           # Mattermost API + WebSocket client
-│   ├── matterformat/           # HTML <-> Markdown conversion
-│   └── puppet/                 # Puppet identity routing
-├── deploy/                     # Kubernetes manifests
-├── config.example.yaml         # Example configuration
-├── Dockerfile                  # Multi-stage container build
-├── docker-compose.yml          # Example full stack
-└── Makefile                    # Build automation
+│   └── connector/                  # bridgev2 NetworkConnector implementation
+│       ├── matrixfmt/              # Matrix HTML → Mattermost markdown
+│       └── mattermostfmt/          # Mattermost markdown → Matrix HTML
+├── doc/                            # Design and usage documentation
+├── config.yaml.example            # Example configuration
+├── Dockerfile                      # Multi-stage container build
+├── docker-compose.yml              # Example full stack
+└── Makefile                        # Build automation
 ```
 
 ## Acknowledgments
@@ -236,4 +235,4 @@ make fmt
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+Mozilla Public License 2.0. See [LICENSE](LICENSE) for details.
