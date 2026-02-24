@@ -1,7 +1,8 @@
 BINARY_NAME := mautrix-mattermost
 MODULE := github.com/aiku/mautrix-mattermost
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS := -ldflags "-s -w -X main.Tag=$(VERSION) -X main.Commit=$(COMMIT) -X 'main.BuildTime=$(shell date -Iseconds)'"
 
 # Platform-aware libolm CGO flags (needed for mautrix olm bindings).
 UNAME_S := $(shell uname -s)

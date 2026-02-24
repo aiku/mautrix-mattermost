@@ -31,5 +31,6 @@ var m = mxmain.BridgeMain{
 }
 
 func main() {
+	m.InitVersion(Tag, Commit, BuildTime)
 	m.Run()
 }
