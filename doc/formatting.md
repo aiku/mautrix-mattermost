@@ -90,7 +90,7 @@ If the text contains no Markdown formatting (checked via regex), returns a plain
 2. Code block extraction into placeholders (protects content from further processing)
 3. Line-by-line structural processing on raw text: blockquotes, headings, lists
 4. HTML-escape remaining inline text
-5. Inline formatting: bold, italic, strikethrough, inline code, links
+5. Inline formatting: inline code, bold, italic, strikethrough, links
 6. Restore code blocks with language hints
 7. Paragraph wrapping (double newlines)
 8. Line breaks (remaining single newlines)
@@ -132,7 +132,7 @@ type ParsedMessage struct {
 - **Nested formatting**: The regex-based approach does not handle deeply nested formatting (e.g., bold inside italic inside a list item). Each pattern is applied independently.
 - **Italic edge cases**: The italic regex in Mattermost-to-Matrix requires non-asterisk characters around underscores to avoid false matches with URLs containing underscores.
 - **Tables**: Neither direction supports table conversion.
-- **Mentions**: Mattermost `@username` mentions are detected by regex but not converted to Matrix user mention pills. They pass through as plain text.
+- **Mentions**: Mattermost `@username` mentions are not specifically handled and pass through as plain text. They are not converted to Matrix user mention pills.
 
 ## Adding Support for New Elements
 

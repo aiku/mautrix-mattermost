@@ -6,7 +6,7 @@ A Matrix-Mattermost bridge built on the mautrix bridgev2 framework with first-cl
 
 ## Language & Build
 
-- **Language**: Go 1.24 (go.mod); CI tests 1.22, 1.23
+- **Language**: Go 1.26 (go.mod); CI tests 1.26
 - **Module**: `github.com/aiku/mautrix-mattermost`
 - **Build**: `make build` (preferred — includes version ldflags) or `go build ./cmd/mautrix-mattermost/`
 - **Run**: `./mautrix-mattermost -c config.yaml`
@@ -58,17 +58,16 @@ pkg/connector/mattermostfmt/ # Mattermost markdown → Matrix HTML
 
 ### Echo Prevention
 Multi-layer, critical for preventing infinite loops:
-1. Puppet bot user ID check (`IsPuppetUserID`)
-2. Bridge bot user ID check
-3. Relay bot user ID check
+1. Bridge bot user ID check (also covers relay bot)
+2. System message filtering
+3. Puppet bot user ID check (`IsPuppetUserID`)
 4. Configurable username prefix check (`isBridgeUsername`)
-5. System message filtering
 **Never simplify or remove echo prevention layers.**
 
 ### Hot-Reload
 - `POST /api/reload-puppets` — no body reloads from env; with JSON body:
   ```json
-  {"puppets": [{"slug": "ALICE", "mxid": "@alice:example.com", "token": "bot-token"}]}
+  [{"slug": "ALICE", "mxid": "@alice:example.com", "token": "bot-token"}]
   ```
 - `WatchNewPortals()` — continuous goroutine for new portal rooms
 - Both are essential for dynamic bot provisioning at runtime

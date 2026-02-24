@@ -29,6 +29,15 @@ bot_prefix: ""
 # Set to empty string to disable the admin API.
 # Can be overridden via BRIDGE_API_ADDR environment variable.
 admin_api_addr: ":29320"
+
+# Enable message backfill to populate channel history on first sync.
+backfill_enabled: false
+
+# Maximum number of messages to backfill per channel.
+backfill_max_count: 100
+
+# Typing indicator timeout in seconds.
+typing_timeout: 5
 ```
 
 ### Display Name Template

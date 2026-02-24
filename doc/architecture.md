@@ -12,7 +12,7 @@ mautrix-mattermost is a Matrix-Mattermost bridge built on the [mautrix bridgev2]
 │   Homeserver     │     │                        │     │   Server         │
 │   (Synapse)      │◄───►│  ┌──────────────────┐  │◄───►│                  │
 │                  │     │  │ Puppet Router     │  │     │  Bot accounts    │
-│  Appservice API  │────►│  │ (resolveClient)  │──│────►│  per Matrix user │
+│  Appservice API  │────►│  │ (resolvePostClient)  │──│────►│  per Matrix user │
 │                  │     │  └──────────────────┘  │     │                  │
 │                  │     │  ┌──────────────────┐  │     │                  │
 │                  │◄────│  │ WebSocket Listener│◄─│─────│  Real-time events│
