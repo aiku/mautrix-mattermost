@@ -51,6 +51,8 @@ services:
     ports:
       - "29319:29319"
     volumes:
+      # Copy config.yaml.example to config.yaml and fill in your values.
+      # See config.yaml.example for a complete bridgev2-format template.
       - ./config.yaml:/data/config.yaml:ro
     environment:
       # Auto-login (optional, for single-server setups)
