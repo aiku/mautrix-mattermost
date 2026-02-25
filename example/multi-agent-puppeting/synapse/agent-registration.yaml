@@ -1,0 +1,12 @@
+# Appservice registration for the agent demo.
+# Allows the demo to impersonate @agent-*:localhost MXIDs.
+id: agent-demo
+url: http://agents:8080
+as_token: demo_agent_as_token_2024
+hs_token: demo_agent_hs_token_2024
+sender_localpart: agentbot
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@agent-.+:localhost'
+rate_limited: false

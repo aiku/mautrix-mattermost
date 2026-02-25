@@ -61,13 +61,25 @@ docker run -d \
   ghcr.io/aiku/mautrix-mattermost:latest
 ```
 
+### Multi-Agent Demo
+
+See 3 AI agents posting under distinct Mattermost identities in under 2 minutes:
+
+```bash
+cd example/multi-agent-puppeting
+docker compose up --build
+# Open http://localhost:18065 — login: admin / DemoAdmin123!
+```
+
+See [example/multi-agent-puppeting/](example/multi-agent-puppeting/) for the full walkthrough.
+
 ### Docker Compose
 
-See [docker-compose.yml](docker-compose.yml) for a full example stack with Mattermost, Synapse, and PostgreSQL.
+See [docker-compose.yml](docker-compose.yml) for a full stack with Mattermost, Synapse, and PostgreSQL.
 
 ```bash
 # Copy and edit configuration
-cp config.example.yaml config/config.yaml
+cp config.yaml.example config.yaml
 # Edit config.yaml with your settings
 
 # Start the stack
@@ -168,17 +180,15 @@ Add or remove puppets at runtime without restarting the bridge:
 
 ```bash
 # Reload from current environment variables
-curl -X POST http://localhost:29319/api/reload-puppets
+curl -X POST http://localhost:29320/api/reload-puppets
 
 # Reload with explicit puppet entries
-curl -X POST http://localhost:29319/api/reload-puppets \
+curl -X POST http://localhost:29320/api/reload-puppets \
   -H "Content-Type: application/json" \
-  -d '{
-    "puppets": [
-      {"slug": "ALICE", "mxid": "@alice:example.com", "token": "bot-token"},
-      {"slug": "BOB", "mxid": "@bob:example.com", "token": "bot-token"}
-    ]
-  }'
+  -d '[
+    {"slug": "ALICE", "mxid": "@alice:example.com", "token": "bot-token"},
+    {"slug": "BOB", "mxid": "@bob:example.com", "token": "bot-token"}
+  ]'
 ```
 
 The response includes the count of active puppets and any errors encountered.
@@ -187,7 +197,7 @@ The response includes the count of active puppets and any errors encountered.
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.26 or later
 - Docker (for integration tests)
 - golangci-lint (for linting)
 
@@ -220,6 +230,8 @@ make fmt
 │   └── connector/                  # bridgev2 NetworkConnector implementation
 │       ├── matrixfmt/              # Matrix HTML → Mattermost markdown
 │       └── mattermostfmt/          # Mattermost markdown → Matrix HTML
+├── example/
+│   └── multi-agent-puppeting/      # Self-contained multi-agent demo (docker compose up)
 ├── doc/                            # Design and usage documentation
 ├── config.yaml.example            # Example configuration
 ├── Dockerfile                      # Multi-stage container build

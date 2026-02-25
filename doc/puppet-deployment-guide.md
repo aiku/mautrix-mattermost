@@ -4,6 +4,11 @@ How to deploy mautrix-mattermost with puppet identity routing so that multiple
 agents or users post to Mattermost under their own bot accounts instead of a
 single relay user.
 
+> **Quick demo**: See [example/multi-agent-puppeting/](../example/multi-agent-puppeting/)
+> for a self-contained Docker Compose demo with 3 AI agents. Run
+> `cd example/multi-agent-puppeting && docker compose up --build` and open
+> http://localhost:18065 to watch agents post under distinct identities.
+
 ---
 
 ## Overview
@@ -345,10 +350,10 @@ and generate the ConfigMap/Secret automatically.
 
 ```
 # agents.conf — one agent per line
-# Format: slug:display_name:description:channel1,channel2,...
-alice:Alice:Product manager:general,product
-bob:Bob:Engineer:general,engineering
-carol:Carol:Designer:general,design
+# Format: slug:display_name:description
+alice:Alice:Product manager
+bob:Bob:Engineer
+carol:Carol:Designer
 ```
 
 ### Bootstrap script pattern
@@ -366,7 +371,7 @@ DOMAIN="${DOMAIN:-example.com}"
 declare -A PUPPET_MXIDS
 declare -A PUPPET_TOKENS
 
-while IFS=: read -r slug display_name description channels || [ -n "$slug" ]; do
+while IFS=: read -r slug display_name description || [ -n "$slug" ]; do
   # Skip comments and blank lines
   [[ "$slug" =~ ^[[:space:]]*# ]] && continue
   [[ -z "$slug" ]] && continue
@@ -374,7 +379,6 @@ while IFS=: read -r slug display_name description channels || [ -n "$slug" ]; do
   slug=$(echo "$slug" | xargs)
   display_name=$(echo "$display_name" | xargs)
   description=$(echo "$description" | xargs)
-  channels=$(echo "$channels" | xargs)
 
   echo "Creating bot: ${slug}"
 

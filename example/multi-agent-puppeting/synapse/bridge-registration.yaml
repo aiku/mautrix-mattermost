@@ -1,0 +1,17 @@
+# Appservice registration for mautrix-mattermost bridge.
+# Tokens must match bridge/config.yaml appservice.as_token and appservice.hs_token.
+id: mautrix-mattermost
+url: http://mautrix-mattermost:29319
+as_token: demo_bridge_as_token_2024
+hs_token: demo_bridge_hs_token_2024
+sender_localpart: mattermostbot
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@mattermost_.+:localhost'
+  aliases:
+    - exclusive: true
+      regex: '#mattermost_.+:localhost'
+rate_limited: false
+push_ephemeral: true
+de.sorunome.msc2409.push_ephemeral: true

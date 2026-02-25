@@ -4,7 +4,7 @@ Thank you for your interest in contributing. This guide will help you get starte
 
 ## Prerequisites
 
-- Go 1.22 or later
+- Go 1.26 or later
 - Docker and Docker Compose (for integration tests)
 - [golangci-lint](https://golangci-lint.run/welcome/install/)
 

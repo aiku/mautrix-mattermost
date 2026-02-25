@@ -1,0 +1,122 @@
+# Multi-Agent Puppeting Demo
+#
+# Starts a full stack: Postgres, Mattermost, Synapse, mautrix-mattermost
+# bridge, and a Python agent demo. Run with: docker compose up
+#
+# After ~2 minutes, open http://localhost:18065 and log in as admin / DemoAdmin123!
+# to see 3 AI agents posting under distinct identities in ~town-square.
+
+services:
+  # ── Database (Mattermost only; bridge + Synapse use SQLite) ──────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: mattermost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Mattermost ───────────────────────────────────────────────────────
+  mattermost:
+    image: mattermost/mattermost-team-edition:latest
+    platform: linux/amd64
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:changeme@postgres:5432/mattermost?sslmode=disable
+      MM_SERVICESETTINGS_SITEURL: http://localhost:18065
+      MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION: "true"
+      MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS: "true"
+      MM_TEAMSETTINGS_ENABLEOPENSERVER: "true"
+    ports:
+      - "18065:8065"
+    volumes:
+      - mattermost_data:/mattermost/data
+    healthcheck:
+      test: ["CMD", "/mattermost/bin/mmctl", "--local", "system", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+
+  # ── Synapse (Matrix homeserver) ──────────────────────────────────────
+  synapse:
+    build: ./synapse
+    environment:
+      SYNAPSE_SERVER_NAME: localhost
+      SYNAPSE_REPORT_STATS: "no"
+    # Port 8008 not exposed to host — only needed by other containers.
+    # Uncomment to debug Synapse directly: ports: ["8008:8008"]
+    volumes:
+      - synapse_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8008/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # ── Init (bootstrap Mattermost bots + Synapse users) ────────────────
+  # Runs once, creates all accounts and tokens, writes bridge env vars.
+  init:
+    build: ./init
+    depends_on:
+      mattermost:
+        condition: service_healthy
+      synapse:
+        condition: service_healthy
+    environment:
+      MM_URL: http://mattermost:8065
+      SYNAPSE_URL: http://synapse:8008
+      MM_ADMIN_PASSWORD: "DemoAdmin123!"
+      SYNAPSE_SHARED_SECRET: demo_synapse_shared_secret
+      SERVER_NAME: localhost
+      TEAM_NAME: demo
+    volumes:
+      - bridge_data:/bridge-data
+
+  # ── mautrix-mattermost bridge ───────────────────────────────────────
+  mautrix-mattermost:
+    build:
+      context: ../..
+      dockerfile: example/multi-agent-puppeting/bridge/Dockerfile
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      mattermost:
+        condition: service_healthy
+      synapse:
+        condition: service_healthy
+    ports:
+      - "19319:29319"
+      - "19320:29320"
+    volumes:
+      - bridge_data:/data
+      - ./bridge/config.yaml:/data/config.yaml:ro
+
+  # ── Agent demo (posts as 3 agents via Matrix puppet pipeline) ───────
+  agents:
+    build: ./agents
+    depends_on:
+      mautrix-mattermost:
+        condition: service_started
+    environment:
+      SYNAPSE_URL: http://synapse:8008
+      SERVER_NAME: localhost
+      BRIDGE_AS_TOKEN: demo_bridge_as_token_2024
+      AGENT_AS_TOKEN: demo_agent_as_token_2024
+      SYNAPSE_ADMIN_PASSWORD: "DemoAdmin123!"
+
+volumes:
+  postgres_data:
+  mattermost_data:
+  synapse_data:
+  bridge_data:
