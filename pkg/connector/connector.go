@@ -6,6 +6,7 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -266,6 +267,11 @@ func (mc *MattermostConnector) autoLogin(ctx context.Context) {
 		Str("server_url", serverURL).
 		Msg("Auto-login complete")
 
+	// Enable double puppeting so that when this user posts on Mattermost,
+	// the bridge creates Matrix events as their real MXID (e.g. @admin:aiku.fr)
+	// instead of the ghost (@mattermost_<id>:aiku.fr).
+	mc.setupDoublePuppet(ctx, user)
+
 	// Set relay for all portals so puppet users' Matrix messages get bridged.
 	// The bridgev2 framework requires a per-portal relay login before it will
 	// call HandleMatrixMessage (where our puppet system selects the correct
@@ -311,6 +317,86 @@ func (mc *MattermostConnector) autoSetRelay(ctx context.Context, login *bridgev2
 			time.Sleep(30 * time.Second)
 		}
 	}
+}
+
+// setupDoublePuppet enables double puppeting for a bridge user by obtaining
+// a Synapse access token via password login. This allows the bridge to send
+// Matrix events as the user's real MXID (e.g. @admin:aiku.fr) instead of the
+// ghost user (@mattermost_<id>:aiku.fr) when the user posts on Mattermost.
+//
+// Requires SYNAPSE_DOUBLE_PUPPET_PASSWORD env var to be set.
+// The Synapse homeserver URL comes from double_puppet.servers config.
+func (mc *MattermostConnector) setupDoublePuppet(ctx context.Context, user *bridgev2.User) {
+	password := os.Getenv("SYNAPSE_DOUBLE_PUPPET_PASSWORD")
+	if password == "" {
+		mc.Bridge.Log.Debug().Msg("Double puppet: SYNAPSE_DOUBLE_PUPPET_PASSWORD not set, skipping")
+		return
+	}
+
+	mxid := user.MXID
+	localpart, _, err := mxid.Parse()
+	if err != nil {
+		mc.Bridge.Log.Error().Err(err).Str("mxid", string(mxid)).Msg("Double puppet: failed to parse MXID")
+		return
+	}
+
+	// Get Synapse URL from the double_puppet.servers config or fall back to env var.
+	synapseURL := os.Getenv("SYNAPSE_URL")
+	if synapseURL == "" {
+		synapseURL = "http://synapse:8008"
+	}
+
+	// Login to Synapse to get an access token for this user.
+	loginPayload, err := json.Marshal(map[string]string{
+		"type":     "m.login.password",
+		"user":     localpart,
+		"password": password,
+	})
+	if err != nil {
+		mc.Bridge.Log.Error().Err(err).Msg("Double puppet: failed to marshal login payload")
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, synapseURL+"/_matrix/client/v3/login",
+		bytes.NewReader(loginPayload))
+	if err != nil {
+		mc.Bridge.Log.Error().Err(err).Msg("Double puppet: failed to create login request")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		mc.Bridge.Log.Error().Err(err).Msg("Double puppet: Synapse login request failed")
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		mc.Bridge.Log.Error().
+			Int("status", resp.StatusCode).
+			Str("body", string(body)).
+			Msg("Double puppet: Synapse login failed")
+		return
+	}
+
+	var loginResp struct {
+		AccessToken string `json:"access_token"`
+		UserID      string `json:"user_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+		mc.Bridge.Log.Error().Err(err).Msg("Double puppet: failed to decode login response")
+		return
+	}
+
+	if err := user.LoginDoublePuppet(ctx, loginResp.AccessToken); err != nil {
+		mc.Bridge.Log.Error().Err(err).Str("mxid", string(mxid)).Msg("Double puppet: LoginDoublePuppet failed")
+		return
+	}
+
+	mc.Bridge.Log.Info().
+		Str("mxid", string(mxid)).
+		Msg("Double puppet: enabled successfully")
 }
 
 func (mc *MattermostConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
