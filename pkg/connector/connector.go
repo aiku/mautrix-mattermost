@@ -388,7 +388,7 @@ func (mc *MattermostConnector) setupDoublePuppet(ctx context.Context, user *brid
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) // #nosec G704 -- URL built from operator-controlled SYNAPSE_URL env var, not user input
 	if err != nil {
 		mc.Bridge.Log.Error().Err(err).Msg("Double puppet: Synapse login request failed")
 		return
@@ -405,7 +405,7 @@ func (mc *MattermostConnector) setupDoublePuppet(ctx context.Context, user *brid
 	}
 
 	var loginResp struct {
-		AccessToken string `json:"access_token"`
+		AccessToken string `json:"access_token"` // #nosec G117 -- response decoder, token passed to LoginDoublePuppet only
 		UserID      string `json:"user_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
