@@ -147,6 +147,58 @@ Access is protected by `sync.RWMutex` (`puppetMu`). Read operations use `RLock`/
 
 Note that the initial `loadPuppets` call during `Start()` does not lock because it runs before any goroutines are spawned.
 
+## Double Puppeting (Mattermost → Matrix)
+
+The puppet system described above handles Matrix → Mattermost direction. **Double puppeting** handles the reverse: when a Mattermost user posts, the corresponding Matrix event appears under their real MXID rather than a ghost (`@mattermost_<id>:server`).
+
+### Configuration
+
+Add `double_puppet` to the bridge config:
+
+```yaml
+double_puppet:
+  servers:
+    example.com: https://matrix.example.com
+  secrets:
+    example.com: "as_token:your_bridge_as_token"
+  allow_discovery: false
+```
+
+The `secrets` map uses the bridge's own AS token (prefixed with `as_token:`) to impersonate users via the appservice API.
+
+### Appservice Registration
+
+The bridge's appservice registration must include **non-exclusive namespaces** for users that need double puppeting:
+
+```yaml
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@mattermost_.+:example\.com'
+    # Non-exclusive: bridge AS can impersonate these for double puppeting
+    - exclusive: false
+      regex: '@admin:example\.com'
+    - exclusive: false
+      regex: '@agent-.+:example\.com'
+```
+
+Without these namespace entries, the homeserver will reject the bridge's attempt to send events on behalf of these users.
+
+### How It Works
+
+1. During `loadPuppets()`, the bridge calls `setupUserDoublePuppet()` for each puppet entry, registering a `UserLogin` via the bridgev2 `LoginDoublePuppet()` method.
+2. During `autoLogin()`, the bridge calls `setupUserDoublePuppet()` for the auto-login user (with a legacy password-based fallback).
+3. The `dpLogins` map tracks `MM user ID → UserLoginID`.
+4. When a Mattermost event arrives, `senderFor()` in `handlemattermost.go` checks `dpLogins`. If the MM poster has a DP login, the event is routed through that login's intent, so the Matrix event appears under the real MXID.
+
+### Interaction with Puppet Routing
+
+The two systems are complementary:
+- **Puppet routing** (Matrix → MM): ensures messages from `@alice:server` post to MM as `alice-bot`
+- **Double puppeting** (MM → Matrix): ensures messages from `alice` in MM appear as `@alice:server` in Matrix
+
+Together, they create a seamless bidirectional identity mapping.
+
 ## Scaling
 
 The puppet system has been tested with 30+ concurrent puppets. Memory overhead per puppet is minimal:

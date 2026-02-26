@@ -494,7 +494,66 @@ print(f"Added: {data['added']}, Removed: {data['removed']}, Total: {data['total'
 
 ---
 
-## 9. Echo Prevention
+## 9. Double Puppeting Setup
+
+Double puppeting makes incoming Mattermost messages appear in Matrix under the real user's MXID instead of a ghost account. This is configured alongside the puppet system.
+
+### Step 1: Configure `double_puppet` in bridge config
+
+```yaml
+double_puppet:
+  servers:
+    example.com: https://matrix.example.com
+  secrets:
+    example.com: "as_token:your_bridge_as_token"
+  allow_discovery: false
+```
+
+The `as_token:` prefix tells the bridge to use its appservice token (from `appservice.as_token`) to impersonate users.
+
+### Step 2: Add non-exclusive namespaces to appservice registration
+
+The bridge can only impersonate users that are in its registered namespaces. Add non-exclusive entries for each user or user pattern that needs double puppeting:
+
+```yaml
+# In your bridge appservice registration file
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@mattermost_.+:example\.com'
+    # Double puppeting: bridge impersonates these users
+    - exclusive: false
+      regex: '@admin:example\.com'
+    - exclusive: false
+      regex: '@agent-.+:example\.com'
+```
+
+> **Important**: If another appservice has exclusive access to a namespace (e.g., an agent appservice owns `@agent-.+`), the bridge's non-exclusive entry still allows it to send events on behalf of those users.
+
+### Step 3: Restart Synapse and bridge
+
+Synapse reads appservice registrations on startup, so it needs a restart after changing the registration file.
+
+### How it activates
+
+- For **puppet entries**: `loadPuppets()` automatically calls `setupUserDoublePuppet()` for each puppet.
+- For **auto-login users**: `autoLogin()` calls `setupUserDoublePuppet()` using the AS token config, with a fallback to the legacy password-based method (`SYNAPSE_DOUBLE_PUPPET_PASSWORD`).
+- No manual API calls are needed -- double puppeting is set up automatically.
+
+### Verification
+
+Check the bridge logs for:
+```
+Double puppet enabled for auto-login user  mm_user_id=... mxid=@admin:example.com
+```
+or:
+```
+Puppet double-puppet login  puppet=ALICE mm_user_id=... mxid=@alice:example.com
+```
+
+---
+
+## 10. Echo Prevention
 
 The bridge has multiple layers of echo prevention to stop infinite message loops.
 When configuring puppets, be aware:
@@ -514,7 +573,7 @@ When configuring puppets, be aware:
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
@@ -525,10 +584,12 @@ When configuring puppets, be aware:
 | New rooms don't have relay | `autoSetRelay()` ran before room was created | Manually set relay or restart bridge |
 | Hot-reload doesn't pick up new puppets | ConfigMap/Secret updated but not reloaded | POST to `/api/reload-puppets` or restart pod |
 | Token expired or invalid | Personal access tokens were revoked | Regenerate via `POST /users/{id}/tokens` |
+| Double puppet not working | Bridge AS token can't impersonate user | Add non-exclusive namespace to bridge registration (Section 9) |
+| Ghost instead of real MXID | `double_puppet.secrets` missing or wrong AS token | Ensure `as_token:` prefix and token matches registration |
 
 ---
 
-## 11. Architecture Diagram
+## 12. Architecture Diagram
 
 ```
 ┌────────────────────────────────────────────────────────────────┐

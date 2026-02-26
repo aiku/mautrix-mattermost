@@ -47,6 +47,13 @@ type MattermostConnector struct {
 	Config   Config
 	Puppets  map[id.UserID]*PuppetClient
 	puppetMu sync.RWMutex
+
+	// dpLogins maps Mattermost user IDs to UserLoginIDs for double puppet
+	// resolution. When an incoming MM event's sender matches a key in this
+	// map, the corresponding UserLoginID is set on EventSender.SenderLogin
+	// so the bridgev2 framework uses that user's double puppet intent.
+	dpLogins   map[string]networkid.UserLoginID
+	dpLoginsMu sync.RWMutex
 }
 
 var _ bridgev2.NetworkConnector = (*MattermostConnector)(nil)
@@ -60,6 +67,7 @@ func (mc *MattermostConnector) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to post-process config: %w", err)
 	}
 	mc.Puppets = make(map[id.UserID]*PuppetClient)
+	mc.dpLogins = make(map[string]networkid.UserLoginID)
 	mc.loadPuppets(ctx)
 	go mc.autoLogin(ctx)
 
@@ -77,6 +85,7 @@ func (mc *MattermostConnector) Start(ctx context.Context) error {
 	if apiAddr != "" {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/api/reload-puppets", mc.HandleReloadPuppets)
+		mux.HandleFunc("/api/double-puppet", mc.HandleDoublePuppet)
 		server := &http.Server{
 			Addr:         apiAddr,
 			Handler:      mux,
@@ -166,6 +175,15 @@ func (mc *MattermostConnector) loadPuppets(ctx context.Context) {
 			Str("mm_username", me.Username).
 			Str("mm_user_id", me.Id).
 			Msg("Loaded puppet client")
+
+		// Also set up double puppeting so MM→Matrix events from this user
+		// appear under their real Matrix MXID instead of a ghost.
+		if err := mc.setupUserDoublePuppet(ctx, me.Id, mxid); err != nil {
+			mc.Bridge.Log.Warn().Err(err).
+				Str("puppet", name).
+				Str("mxid", mxid).
+				Msg("Failed to setup double puppet for puppet user")
+		}
 	}
 }
 
@@ -193,14 +211,15 @@ func (mc *MattermostConnector) autoLogin(ctx context.Context) {
 	// Wait for the bridge framework to finish loading existing logins.
 	time.Sleep(5 * time.Second)
 
-	// Check if any logins already exist — if so, the framework handles reconnection.
-	existingUsers, err := mc.Bridge.DB.UserLogin.GetAllUserIDsWithLogins(ctx)
+	// Check if any full logins exist. Double-puppet-only logins don't count —
+	// they have no MM connection and can't serve as the relay login.
+	hasFullLogin, err := mc.hasFullUserLogin(ctx)
 	if err != nil {
 		mc.Bridge.Log.Error().Err(err).Msg("Auto-login: failed to check existing logins")
 		return
 	}
-	if len(existingUsers) > 0 {
-		mc.Bridge.Log.Info().Int("count", len(existingUsers)).Msg("Existing logins found, skipping auto-login")
+	if hasFullLogin {
+		mc.Bridge.Log.Info().Msg("Existing full login found, skipping auto-login")
 		return
 	}
 
@@ -270,7 +289,12 @@ func (mc *MattermostConnector) autoLogin(ctx context.Context) {
 	// Enable double puppeting so that when this user posts on Mattermost,
 	// the bridge creates Matrix events as their real MXID (e.g. @admin:aiku.fr)
 	// instead of the ghost (@mattermost_<id>:aiku.fr).
-	mc.setupDoublePuppet(ctx, user)
+	// Use setupUserDoublePuppet first (as_token: from double_puppet.secrets config),
+	// falling back to the legacy password-based setupDoublePuppet if that fails.
+	if err := mc.setupUserDoublePuppet(ctx, me.Id, ownerMXID); err != nil {
+		mc.Bridge.Log.Warn().Err(err).Msg("Auto-login: as_token double puppet failed, trying password fallback")
+		mc.setupDoublePuppet(ctx, user)
+	}
 
 	// Set relay for all portals so puppet users' Matrix messages get bridged.
 	// The bridgev2 framework requires a per-portal relay login before it will
@@ -399,6 +423,181 @@ func (mc *MattermostConnector) setupDoublePuppet(ctx context.Context, user *brid
 		Msg("Double puppet: enabled successfully")
 }
 
+// hasFullUserLogin checks whether any full (non-double-puppet-only) UserLogin
+// exists in the database. It queries all users with logins, then inspects
+// each login's metadata to distinguish full logins from dp-only ones.
+func (mc *MattermostConnector) hasFullUserLogin(ctx context.Context) (bool, error) {
+	userIDs, err := mc.Bridge.DB.UserLogin.GetAllUserIDsWithLogins(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, uid := range userIDs {
+		logins, err := mc.Bridge.DB.UserLogin.GetAllForUser(ctx, uid)
+		if err != nil {
+			return false, err
+		}
+		for _, login := range logins {
+			meta, ok := login.Metadata.(*UserLoginMetadata)
+			if !ok || meta == nil || !meta.DoublePuppetOnly {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// useConfigASToken is the sentinel value the bridgev2 framework uses to
+// indicate that double puppeting should use the as_token from config rather
+// than a per-user access token. Matches the constant in bridgev2/matrix.
+const useConfigASToken = "appservice-config"
+
+// setupUserDoublePuppet creates a lightweight UserLogin for a Mattermost user
+// and enables double puppeting for the corresponding Matrix user. The login
+// has no MM API client or WebSocket — it exists solely so the framework can
+// route incoming MM events through the real Matrix user's double puppet intent.
+//
+// If a UserLogin already exists for the MM user (e.g. the auto-login user),
+// it only registers the dpLogins mapping without creating a duplicate.
+func (mc *MattermostConnector) setupUserDoublePuppet(ctx context.Context, mmUserID, matrixMXID string) error {
+	if mc.Bridge == nil || mc.Bridge.DB == nil {
+		return fmt.Errorf("bridge not fully initialized")
+	}
+
+	mxid := id.UserID(matrixMXID)
+	loginID := MakeUserLoginID(mmUserID)
+
+	// Check if a full login already exists for this MM user (e.g. auto-login).
+	existing := mc.Bridge.GetCachedUserLoginByID(loginID)
+	if existing != nil {
+		// Already has a UserLogin — just ensure dp mapping and double puppet.
+		mc.dpLoginsMu.Lock()
+		mc.dpLogins[mmUserID] = loginID
+		mc.dpLoginsMu.Unlock()
+
+		user, err := mc.Bridge.GetUserByMXID(ctx, mxid)
+		if err != nil {
+			return fmt.Errorf("get user for existing login: %w", err)
+		}
+		if err := user.LoginDoublePuppet(ctx, useConfigASToken); err != nil {
+			mc.Bridge.Log.Warn().Err(err).
+				Str("mxid", matrixMXID).
+				Msg("Double puppet: as_token setup failed for existing login, skipping")
+		} else {
+			mc.Bridge.Log.Info().
+				Str("mm_user_id", mmUserID).
+				Str("matrix_mxid", matrixMXID).
+				Msg("Double puppet: enabled for existing login")
+		}
+		return nil
+	}
+
+	// Get or create the bridgev2 User for this Matrix MXID.
+	user, err := mc.Bridge.GetUserByMXID(ctx, mxid)
+	if err != nil {
+		return fmt.Errorf("get user by mxid: %w", err)
+	}
+
+	// Create a lightweight UserLogin.
+	ul, err := user.NewLogin(ctx, &database.UserLogin{
+		ID:         loginID,
+		RemoteName: fmt.Sprintf("double-puppet:%s", mmUserID),
+	}, &bridgev2.NewLoginParams{
+		LoadUserLogin: mc.LoadUserLogin,
+	})
+	if err != nil {
+		return fmt.Errorf("create login: %w", err)
+	}
+
+	meta := ul.Metadata.(*UserLoginMetadata)
+	meta.UserID = mmUserID
+	meta.DoublePuppetOnly = true
+	if err := ul.Save(ctx); err != nil {
+		return fmt.Errorf("save login: %w", err)
+	}
+
+	// Set the userID on the client so IsThisUser() matches.
+	mmClient := ul.Client.(*MattermostClient)
+	mmClient.userID = mmUserID
+
+	// Enable double puppeting via as_token.
+	if err := user.LoginDoublePuppet(ctx, useConfigASToken); err != nil {
+		return fmt.Errorf("login double puppet: %w", err)
+	}
+
+	// Register in reverse lookup map.
+	mc.dpLoginsMu.Lock()
+	mc.dpLogins[mmUserID] = loginID
+	mc.dpLoginsMu.Unlock()
+
+	mc.Bridge.Log.Info().
+		Str("mm_user_id", mmUserID).
+		Str("matrix_mxid", matrixMXID).
+		Msg("Double puppet: enabled for user")
+
+	return nil
+}
+
+// DoublePuppetLoginID returns the UserLoginID for a given Mattermost user ID
+// if one exists in the double puppet map. Thread-safe.
+func (mc *MattermostConnector) DoublePuppetLoginID(mmUserID string) (networkid.UserLoginID, bool) {
+	mc.dpLoginsMu.RLock()
+	defer mc.dpLoginsMu.RUnlock()
+	id, ok := mc.dpLogins[mmUserID]
+	return id, ok
+}
+
+// maxDoublePuppetBodySize is the maximum allowed request body for double puppet registration (64 KB).
+const maxDoublePuppetBodySize = 64 << 10
+
+// HandleDoublePuppet is an HTTP handler for POST /api/double-puppet.
+// It registers a MM user → Matrix MXID mapping for double puppeting without
+// requiring a Mattermost API token.
+func (mc *MattermostConnector) HandleDoublePuppet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxDoublePuppetBodySize)
+	defer func() { _ = r.Body.Close() }()
+
+	var req struct {
+		MMUserID   string `json:"mm_user_id"`
+		MatrixMXID string `json:"matrix_mxid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.MMUserID == "" || req.MatrixMXID == "" {
+		http.Error(w, "mm_user_id and matrix_mxid are required", http.StatusBadRequest)
+		return
+	}
+
+	mc.Bridge.Log.Info().
+		Str("remote_addr", r.RemoteAddr).
+		Str("mm_user_id", req.MMUserID).
+		Str("matrix_mxid", req.MatrixMXID).
+		Msg("Double puppet registration requested")
+
+	ctx := r.Context()
+	if err := mc.setupUserDoublePuppet(ctx, req.MMUserID, req.MatrixMXID); err != nil {
+		mc.Bridge.Log.Error().Err(err).
+			Str("mm_user_id", req.MMUserID).
+			Str("matrix_mxid", req.MatrixMXID).
+			Msg("Double puppet registration failed")
+		http.Error(w, fmt.Sprintf("failed to setup double puppet: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":      "ok",
+		"mm_user_id":  req.MMUserID,
+		"matrix_mxid": req.MatrixMXID,
+	})
+}
+
 func (mc *MattermostConnector) LoadUserLogin(_ context.Context, login *bridgev2.UserLogin) error {
 	mmClient := NewMattermostClient(login, mc)
 	login.Client = mmClient
@@ -441,6 +640,12 @@ type UserLoginMetadata struct {
 	Token     string `json:"token"`
 	UserID    string `json:"user_id"`
 	TeamID    string `json:"team_id"`
+
+	// DoublePuppetOnly marks this login as a lightweight double-puppet-only
+	// entry. It has no MM API client or WebSocket — it exists solely so the
+	// bridgev2 framework can match incoming MM events to a real Matrix user
+	// and send them via that user's double puppet intent.
+	DoublePuppetOnly bool `json:"double_puppet_only,omitempty"`
 }
 
 // MakeUserLoginID creates a UserLoginID from a Mattermost user ID.
@@ -524,9 +729,13 @@ func (mc *MattermostConnector) ReloadPuppetsFromEntries(ctx context.Context, ent
 	defer mc.puppetMu.Unlock()
 
 	// Remove puppets that are no longer in the desired set.
-	for uid := range mc.Puppets {
+	for uid, puppet := range mc.Puppets {
 		if _, ok := desired[uid]; !ok {
 			mc.Bridge.Log.Info().Str("mxid", string(uid)).Msg("Removing puppet")
+			// Remove double puppet mapping for this puppet's MM user.
+			mc.dpLoginsMu.Lock()
+			delete(mc.dpLogins, puppet.UserID)
+			mc.dpLoginsMu.Unlock()
 			delete(mc.Puppets, uid)
 			removed++
 		}
@@ -572,6 +781,14 @@ func (mc *MattermostConnector) ReloadPuppetsFromEntries(ctx context.Context, ent
 			Str("mm_user_id", me.Id).
 			Str("mm_username", me.Username).
 			Msg("Hot-loaded puppet")
+
+		// Set up double puppeting for the new/updated puppet.
+		if err := mc.setupUserDoublePuppet(ctx, me.Id, entry.MXID); err != nil {
+			mc.Bridge.Log.Warn().Err(err).
+				Str("slug", entry.Slug).
+				Str("mxid", entry.MXID).
+				Msg("Failed to setup double puppet during reload")
+		}
 	}
 
 	mc.Bridge.Log.Info().

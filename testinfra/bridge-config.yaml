@@ -1,0 +1,73 @@
+# mautrix-mattermost bridge config for integration testing
+
+network:
+  server_url: http://mattermost:8065
+  displayname_template: "{{if .Nickname}}{{.Nickname}}{{else}}{{.Username}}{{end}}"
+  bot_prefix: "aiku-"
+  admin_api_addr: ":29320"
+  backfill_enabled: false
+  backfill_max_count: 100
+  typing_timeout: 5
+
+bridge:
+  command_prefix: "!mm"
+  personal_filtering_spaces: false
+  relay:
+    enabled: true
+    admin_only: false
+    message_formats:
+      m.text: "{{ .Message }}"
+      m.notice: "{{ .Message }}"
+      m.emote: "* {{ .Message }}"
+      m.file: "sent a file"
+      m.image: "sent an image"
+      m.audio: "sent an audio file"
+      m.video: "sent a video"
+  permissions:
+    "*": relay
+    "localhost": user
+    "@admin:localhost": admin
+
+database:
+  type: sqlite3-fk-wal
+  uri: file:/data/mautrix-mattermost.db?_txlock=immediate
+
+homeserver:
+  address: http://synapse:8008
+  domain: localhost
+
+appservice:
+  address: http://mautrix-mattermost:29319
+  hostname: 0.0.0.0
+  port: 29319
+  id: mattermost
+  bot:
+    username: mattermostbot
+    displayname: Mattermost Bridge Bot
+  ephemeral_events: true
+  as_token: test-bridge-as-token
+  hs_token: test-bridge-hs-token
+  username_template: "mattermost_{{.}}"
+
+matrix:
+  message_status_events: false
+  delivery_receipts: false
+  message_error_notices: true
+  sync_direct_chat_list: false
+  federate_rooms: true
+
+double_puppet:
+  servers:
+    localhost: http://synapse:8008
+  allow_discovery: false
+  secrets:
+    localhost: "as_token:test-bridge-as-token"
+
+encryption:
+  allow: false
+
+logging:
+  min_level: debug
+  writers:
+    - type: stdout
+      format: pretty-colored

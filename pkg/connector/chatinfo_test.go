@@ -20,8 +20,11 @@ func newTestClient() *MattermostClient {
 	}
 	_ = cfg.PostProcess()
 	return &MattermostClient{
-		connector: &MattermostConnector{Config: cfg},
-		userID:    "myuserid",
+		connector: &MattermostConnector{
+			Config:   cfg,
+			dpLogins: make(map[string]networkid.UserLoginID),
+		},
+		userID: "myuserid",
 	}
 }
 

@@ -21,6 +21,19 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+// senderFor builds an EventSender for the given Mattermost user ID. If the
+// user has a double puppet UserLogin registered, SenderLogin is set so the
+// bridgev2 framework uses that user's double puppet intent instead of a ghost.
+func (m *MattermostClient) senderFor(mmUserID string) bridgev2.EventSender {
+	sender := bridgev2.EventSender{
+		Sender: MakeUserID(mmUserID),
+	}
+	if loginID, ok := m.connector.DoublePuppetLoginID(mmUserID); ok {
+		sender.SenderLogin = loginID
+	}
+	return sender
+}
+
 // handleEvent dispatches a Mattermost WebSocket event to the appropriate handler.
 func (m *MattermostClient) handleEvent(evt *model.WebSocketEvent) {
 	switch evt.EventType() {
@@ -257,10 +270,8 @@ func (m *MattermostClient) handlePosted(evt *model.WebSocketEvent) {
 			LogContext: func(c zerolog.Context) zerolog.Context {
 				return c.Str("post_id", post.Id).Str("channel_id", post.ChannelId)
 			},
-			PortalKey: makePortalKey(post.ChannelId),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(post.UserId),
-			},
+			PortalKey:    makePortalKey(post.ChannelId),
+			Sender:       m.senderFor(post.UserId),
 			Timestamp:    ts,
 			CreatePortal: true,
 		},
@@ -291,9 +302,7 @@ func (m *MattermostClient) handlePostEdited(evt *model.WebSocketEvent) {
 				return c.Str("post_id", post.Id).Str("channel_id", post.ChannelId)
 			},
 			PortalKey: makePortalKey(post.ChannelId),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(post.UserId),
-			},
+			Sender:    m.senderFor(post.UserId),
 			Timestamp: ts,
 		},
 		TargetMessage: MakeMessageID(post.Id),
@@ -323,9 +332,7 @@ func (m *MattermostClient) handlePostDeleted(evt *model.WebSocketEvent) {
 				return c.Str("post_id", post.Id).Str("channel_id", post.ChannelId)
 			},
 			PortalKey: makePortalKey(post.ChannelId),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(post.UserId),
-			},
+			Sender:    m.senderFor(post.UserId),
 			Timestamp: ts,
 		},
 		TargetMessage: MakeMessageID(post.Id),
@@ -352,9 +359,7 @@ func (m *MattermostClient) handleReactionAdded(evt *model.WebSocketEvent) {
 				return c.Str("post_id", reaction.PostId).Str("emoji", reaction.EmojiName)
 			},
 			PortalKey: makePortalKey(evt.GetBroadcast().ChannelId),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(reaction.UserId),
-			},
+			Sender:    m.senderFor(reaction.UserId),
 			Timestamp: ts,
 		},
 		TargetMessage: MakeMessageID(reaction.PostId),
@@ -380,9 +385,7 @@ func (m *MattermostClient) handleReactionRemoved(evt *model.WebSocketEvent) {
 				return c.Str("post_id", reaction.PostId).Str("emoji", reaction.EmojiName)
 			},
 			PortalKey: makePortalKey(evt.GetBroadcast().ChannelId),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(reaction.UserId),
-			},
+			Sender:    m.senderFor(reaction.UserId),
 		},
 		TargetMessage: MakeMessageID(reaction.PostId),
 		EmojiID:       MakeEmojiID(reaction.EmojiName),
@@ -404,9 +407,7 @@ func (m *MattermostClient) handleTyping(evt *model.WebSocketEvent) {
 		EventMeta: simplevent.EventMeta{
 			Type:      bridgev2.RemoteEventTyping,
 			PortalKey: makePortalKey(channelID),
-			Sender: bridgev2.EventSender{
-				Sender: MakeUserID(userID),
-			},
+			Sender:    m.senderFor(userID),
 		},
 		Timeout: time.Duration(timeout) * time.Second,
 	})

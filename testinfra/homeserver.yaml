@@ -1,0 +1,76 @@
+server_name: "localhost"
+pid_file: /data/homeserver.pid
+public_baseurl: "http://localhost:18008"
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: false
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: sqlite3
+  args:
+    database: /data/homeserver.db
+
+log_config: "/data/log.config"
+media_store_path: /data/media_store
+report_stats: false
+signing_key_path: /data/localhost.signing.key
+trusted_key_servers: []
+
+registration_shared_secret: "test-shared-secret"
+enable_registration: true
+enable_registration_without_verification: true
+
+suppress_key_server_warning: true
+
+# Rate limiting completely disabled for testing
+rc_login:
+  address:
+    per_second: 10000
+    burst_count: 10000
+  account:
+    per_second: 10000
+    burst_count: 10000
+  failed_attempts:
+    per_second: 10000
+    burst_count: 10000
+
+rc_registration:
+  per_second: 10000
+  burst_count: 10000
+
+rc_message:
+  per_second: 10000
+  burst_count: 10000
+
+rc_joins:
+  local:
+    per_second: 10000
+    burst_count: 10000
+  remote:
+    per_second: 10000
+    burst_count: 10000
+
+rc_invites:
+  per_room:
+    per_second: 10000
+    burst_count: 10000
+  per_user:
+    per_second: 10000
+    burst_count: 10000
+
+rc_admin_redaction:
+  per_second: 10000
+  burst_count: 10000
+
+rc_3pid_validation:
+  per_second: 10000
+  burst_count: 10000
+
+app_service_config_files:
+  - /data/appservice-mattermost.yaml

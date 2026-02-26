@@ -10,6 +10,7 @@ A Matrix-Mattermost bridge built on the [mautrix](https://github.com/mautrix/go)
 ## Features
 
 - **Puppet Identity Routing** -- Map Matrix users to dedicated Mattermost bot accounts. Messages appear under the bot's name and avatar, not a generic relay user.
+- **Double Puppeting** -- When a Mattermost user posts, the bridge creates the Matrix event as their real MXID (e.g., `@admin:example.com`) instead of a ghost user (`@mattermost_abc:example.com`). Configured via `double_puppet.secrets` using the bridge's appservice token.
 - **Hot-Reload API** -- Add or remove puppet mappings at runtime via `POST /api/reload-puppets` without restarting the bridge.
 - **Bidirectional Messaging** -- Full two-way sync: text, images, video, audio, files, reactions, edits, deletes, typing indicators, and read receipts.
 - **Rich Formatting** -- Converts Matrix HTML to Mattermost markdown and back (bold, italic, code blocks, links, lists, blockquotes, headings).
@@ -47,7 +48,8 @@ When a Mattermost user posts:
 
 1. The bridge receives the event via WebSocket.
 2. Echo prevention filters out messages from bridge bots and puppet bots.
-3. The message is relayed to the corresponding Matrix room.
+3. If double puppeting is enabled for this user, the Matrix event is sent as their real MXID (e.g., `@admin:example.com`) instead of a ghost user.
+4. Otherwise, the message is relayed to the corresponding Matrix room with ghost user attribution.
 
 ## Quick Start
 

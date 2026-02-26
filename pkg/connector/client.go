@@ -75,10 +75,15 @@ func NewMattermostClient(login *bridgev2.UserLogin, connector *MattermostConnect
 		log:         log,
 	}
 	meta := login.Metadata.(*UserLoginMetadata)
-	if meta != nil && meta.Token != "" {
-		mc.serverURL = meta.ServerURL
-		mc.userID = meta.UserID
-		mc.teamID = meta.TeamID
+	if meta == nil {
+		return mc
+	}
+	// Always restore the MM user ID so IsThisUser() works for all login
+	// types, including lightweight double-puppet-only logins.
+	mc.userID = meta.UserID
+	mc.teamID = meta.TeamID
+	mc.serverURL = meta.ServerURL
+	if meta.Token != "" && !meta.DoublePuppetOnly {
 		mc.client = model.NewAPIv4Client(meta.ServerURL)
 		mc.client.SetToken(meta.Token)
 	}
@@ -88,6 +93,20 @@ func NewMattermostClient(login *bridgev2.UserLogin, connector *MattermostConnect
 // Connect implements bridgev2.NetworkAPI. It does not return an error;
 // connection errors are reported via BridgeState.
 func (m *MattermostClient) Connect(ctx context.Context) {
+	// Double-puppet-only logins have no MM client and don't need a connection.
+	// Re-register in the dpLogins map so the mapping survives restarts.
+	meta, _ := m.userLogin.Metadata.(*UserLoginMetadata)
+	if meta != nil && meta.DoublePuppetOnly {
+		m.connector.dpLoginsMu.Lock()
+		m.connector.dpLogins[meta.UserID] = m.userLogin.ID
+		m.connector.dpLoginsMu.Unlock()
+		m.log.Info().
+			Str("mm_user_id", meta.UserID).
+			Str("matrix_mxid", string(m.userLogin.UserMXID)).
+			Msg("Restored double-puppet-only login")
+		return
+	}
+
 	if m.client == nil {
 		m.log.Warn().Msg("Client not initialized, login first")
 		m.userLogin.BridgeState.Send(status.BridgeState{

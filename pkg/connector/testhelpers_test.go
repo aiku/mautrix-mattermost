@@ -335,9 +335,10 @@ func newWebSocketEvent(eventType model.WebsocketEventType, channelID string, dat
 func newFullTestClient(serverURL string) *MattermostClient {
 	log := zerolog.Nop()
 	connector := &MattermostConnector{
-		Bridge:  &bridgev2.Bridge{},
-		Config:  Config{},
-		Puppets: make(map[id.UserID]*PuppetClient),
+		Bridge:   &bridgev2.Bridge{},
+		Config:   Config{},
+		Puppets:  make(map[id.UserID]*PuppetClient),
+		dpLogins: make(map[string]networkid.UserLoginID),
 	}
 	connector.Bridge.Log = log
 
@@ -365,9 +366,10 @@ func testMock(mc *MattermostClient) *mockEventSender {
 func newNotLoggedInClient() *MattermostClient {
 	log := zerolog.Nop()
 	connector := &MattermostConnector{
-		Bridge:  &bridgev2.Bridge{},
-		Config:  Config{},
-		Puppets: make(map[id.UserID]*PuppetClient),
+		Bridge:   &bridgev2.Bridge{},
+		Config:   Config{},
+		Puppets:  make(map[id.UserID]*PuppetClient),
+		dpLogins: make(map[string]networkid.UserLoginID),
 	}
 	connector.Bridge.Log = log
 	return &MattermostClient{

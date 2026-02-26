@@ -64,6 +64,14 @@ Multi-layer, critical for preventing infinite loops:
 4. Configurable username prefix check (`isBridgeUsername`)
 **Never simplify or remove echo prevention layers.**
 
+### Double Puppeting
+When a Mattermost user posts, the bridge creates the Matrix event as their real MXID instead of a ghost user. Two code paths:
+- **`setupUserDoublePuppet()`** (modern) — uses `as_token:` from `double_puppet.secrets` config. Called by both `loadPuppets()` (puppet path) and `autoLogin()` (auto-login path, with password fallback).
+- **`setupDoublePuppet()`** (legacy) — requires `SYNAPSE_DOUBLE_PUPPET_PASSWORD` env var. Silently no-ops if unset.
+- `dpLogins` map: tracks MM user ID → UserLoginID for `senderFor()` routing of incoming MM events through double puppet intents.
+- `senderFor()` in `handlemattermost.go`: checks `dpLogins` for incoming MM events and routes through the double puppet login if available.
+- **Appservice namespace requirement**: The bridge's appservice registration must include non-exclusive namespaces for users that need DP (e.g., `@admin:localhost`, `@agent-.+:localhost`).
+
 ### Hot-Reload
 - `POST /api/reload-puppets` — no body reloads from env; with JSON body:
   ```json

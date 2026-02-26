@@ -9,6 +9,12 @@ namespaces:
   users:
     - exclusive: true
       regex: '@mattermost_.+:localhost'
+    # Non-exclusive: allow bridge AS token to impersonate these users for
+    # double puppeting (posting as real MXID instead of ghost).
+    - exclusive: false
+      regex: '@admin:localhost'
+    - exclusive: false
+      regex: '@agent-.+:localhost'
   aliases:
     - exclusive: true
       regex: '#mattermost_.+:localhost'

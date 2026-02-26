@@ -2048,3 +2048,199 @@ func TestReactionToEmoji_EmojiToReaction_Roundtrip(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// senderFor / double puppet SenderLogin tests
+// ---------------------------------------------------------------------------
+
+func TestSenderFor_NoDoublePuppet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+
+	sender := mc.senderFor("some-user-id")
+
+	if string(sender.Sender) != "some-user-id" {
+		t.Errorf("Sender: got %q, want %q", sender.Sender, "some-user-id")
+	}
+	if sender.SenderLogin != "" {
+		t.Errorf("SenderLogin should be empty, got %q", sender.SenderLogin)
+	}
+}
+
+func TestSenderFor_WithDoublePuppet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+
+	// Register a double puppet mapping.
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["ceo-mm-id"] = MakeUserLoginID("ceo-mm-id")
+	mc.connector.dpLoginsMu.Unlock()
+
+	sender := mc.senderFor("ceo-mm-id")
+
+	if string(sender.Sender) != "ceo-mm-id" {
+		t.Errorf("Sender: got %q, want %q", sender.Sender, "ceo-mm-id")
+	}
+	if string(sender.SenderLogin) != "ceo-mm-id" {
+		t.Errorf("SenderLogin: got %q, want %q", sender.SenderLogin, "ceo-mm-id")
+	}
+}
+
+func TestSenderFor_UnregisteredUserNoSenderLogin(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+
+	// Register one user but query a different one.
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["alice-mm-id"] = MakeUserLoginID("alice-mm-id")
+	mc.connector.dpLoginsMu.Unlock()
+
+	sender := mc.senderFor("bob-mm-id")
+
+	if sender.SenderLogin != "" {
+		t.Errorf("SenderLogin should be empty for unregistered user, got %q", sender.SenderLogin)
+	}
+}
+
+func TestHandlePosted_SenderLoginSet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+	mock := testMock(mc)
+
+	// Register double puppet for the poster.
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["dp-poster"] = MakeUserLoginID("dp-poster")
+	mc.connector.dpLoginsMu.Unlock()
+
+	postJSON, _ := json.Marshal(&model.Post{
+		Id: "p1", UserId: "dp-poster", ChannelId: "ch1", Message: "hello from CEO",
+	})
+	evt := newWebSocketEvent(model.WebsocketEventPosted, "ch1", map[string]any{
+		"post":        string(postJSON),
+		"sender_name": "@ceo",
+	})
+
+	mc.handlePosted(evt)
+
+	events := mock.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	sender := events[0].GetSender()
+	if string(sender.Sender) != "dp-poster" {
+		t.Errorf("Sender: got %q, want %q", sender.Sender, "dp-poster")
+	}
+	if string(sender.SenderLogin) != "dp-poster" {
+		t.Errorf("SenderLogin: got %q, want %q", sender.SenderLogin, "dp-poster")
+	}
+}
+
+func TestHandlePosted_NoSenderLoginForRegularUser(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+	mock := testMock(mc)
+
+	postJSON, _ := json.Marshal(&model.Post{
+		Id: "p1", UserId: "regular-user", ChannelId: "ch1", Message: "hello",
+	})
+	evt := newWebSocketEvent(model.WebsocketEventPosted, "ch1", map[string]any{
+		"post":        string(postJSON),
+		"sender_name": "@regular",
+	})
+
+	mc.handlePosted(evt)
+
+	events := mock.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	sender := events[0].GetSender()
+	if sender.SenderLogin != "" {
+		t.Errorf("SenderLogin should be empty for regular user, got %q", sender.SenderLogin)
+	}
+}
+
+func TestHandleReactionAdded_SenderLoginSet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+	mock := testMock(mc)
+
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["dp-reactor"] = MakeUserLoginID("dp-reactor")
+	mc.connector.dpLoginsMu.Unlock()
+
+	reactionJSON, _ := json.Marshal(&model.Reaction{
+		UserId: "dp-reactor", PostId: "target-post", EmojiName: "heart",
+	})
+	evt := newWebSocketEvent(model.WebsocketEventReactionAdded, "ch1", map[string]any{
+		"reaction": string(reactionJSON),
+	})
+
+	mc.handleReactionAdded(evt)
+
+	events := mock.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if string(events[0].GetSender().SenderLogin) != "dp-reactor" {
+		t.Errorf("SenderLogin: got %q, want %q", events[0].GetSender().SenderLogin, "dp-reactor")
+	}
+}
+
+func TestHandlePostEdited_SenderLoginSet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+	mock := testMock(mc)
+
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["dp-editor"] = MakeUserLoginID("dp-editor")
+	mc.connector.dpLoginsMu.Unlock()
+
+	postJSON, _ := json.Marshal(&model.Post{
+		Id: "p1", UserId: "dp-editor", ChannelId: "ch1", Message: "edited",
+		EditAt: time.Now().UnixMilli(),
+	})
+	evt := newWebSocketEvent(model.WebsocketEventPostEdited, "ch1", map[string]any{
+		"post":        string(postJSON),
+		"sender_name": "@editor",
+	})
+
+	mc.handlePostEdited(evt)
+
+	events := mock.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if string(events[0].GetSender().SenderLogin) != "dp-editor" {
+		t.Errorf("SenderLogin: got %q, want %q", events[0].GetSender().SenderLogin, "dp-editor")
+	}
+}
+
+func TestHandlePostDeleted_SenderLoginSet(t *testing.T) {
+	t.Parallel()
+	mc := newFullTestClient("http://localhost")
+	mock := testMock(mc)
+
+	mc.connector.dpLoginsMu.Lock()
+	mc.connector.dpLogins["dp-deleter"] = MakeUserLoginID("dp-deleter")
+	mc.connector.dpLoginsMu.Unlock()
+
+	postJSON, _ := json.Marshal(&model.Post{
+		Id: "p1", UserId: "dp-deleter", ChannelId: "ch1",
+		DeleteAt: time.Now().UnixMilli(),
+	})
+	evt := newWebSocketEvent(model.WebsocketEventPostDeleted, "ch1", map[string]any{
+		"post":        string(postJSON),
+		"sender_name": "@deleter",
+	})
+
+	mc.handlePostDeleted(evt)
+
+	events := mock.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if string(events[0].GetSender().SenderLogin) != "dp-deleter" {
+		t.Errorf("SenderLogin: got %q, want %q", events[0].GetSender().SenderLogin, "dp-deleter")
+	}
+}

@@ -74,6 +74,38 @@ mautrix-mattermost is a Matrix-Mattermost bridge built on the [mautrix bridgev2]
 
 Puppet map access is protected by `sync.RWMutex` for thread safety. The `Puppets` map is read-locked during message routing (`resolvePostClient` via `IsPuppetUserID`) and write-locked during reload operations (`ReloadPuppetsFromEntries`).
 
+## Double Puppeting (MM → Matrix)
+
+Double puppeting makes incoming Mattermost messages appear in Matrix under the real MXID of the corresponding Matrix user, rather than a ghost account (`@mattermost_<id>:server`).
+
+### How It Works
+
+1. The bridge config declares `double_puppet.secrets` with the bridge's own AS token:
+   ```yaml
+   double_puppet:
+     secrets:
+       example.com: "as_token:bridge_as_token_here"
+   ```
+2. On startup, `loadPuppets()` calls `setupUserDoublePuppet()` for each puppet, which registers a `UserLogin` via `LoginDoublePuppet()` using the AS token.
+3. `autoLogin()` also calls `setupUserDoublePuppet()` for the auto-login user, with a fallback to the legacy password-based `setupDoublePuppet()`.
+4. The `dpLogins` map tracks MM user ID → `UserLoginID`. When a Mattermost event arrives, `senderFor()` checks this map and routes the event through the double puppet login if available.
+5. The bridge sends the Matrix event using the AS token with `?user_id=@realuser:server`, so it appears as the real user.
+
+### Requirements
+
+- The bridge's appservice registration must include **non-exclusive namespaces** for all users that need double puppeting. The bridge AS token can only impersonate users in its registered namespaces.
+- The `double_puppet.servers` config must point to the homeserver URL for each domain.
+
+### Code Path
+
+```
+loadPuppets() / autoLogin()
+  → setupUserDoublePuppet(ctx, mmUserID, ownerMXID)
+    → bridge.LoginDoublePuppet(ctx, "appservice-config")
+      → dpLogins[mmUserID] = userLoginID
+        → senderFor() uses dpLogin for incoming MM events
+```
+
 ## Relay System
 
 The bridgev2 framework requires a "relay login" to be set on each portal room before it will deliver Matrix messages through `HandleMatrixMessage`. Without a relay, the framework rejects messages from non-logged-in users with "not logged in" before the puppet system is ever reached.

@@ -161,6 +161,47 @@ The JSON array represents the **desired state**. Puppets not in the list are rem
 | `removed` | Number of puppets removed |
 | `total` | Total puppets now loaded |
 
+### `POST /api/double-puppet`
+
+Registers a double puppet login for a specific user. This is called automatically by the bridge during startup for puppets and auto-login users, but can also be triggered manually.
+
+The bridge uses the AS token from `double_puppet.secrets` to impersonate users via the appservice API. This endpoint is internal to the bridge framework.
+
+## Double Puppet Configuration
+
+The `double_puppet` section in the bridge config controls Mattermost → Matrix identity mapping:
+
+```yaml
+double_puppet:
+  servers:
+    example.com: https://matrix.example.com
+  secrets:
+    example.com: "as_token:your_bridge_as_token"
+  allow_discovery: false
+```
+
+| Field | Description |
+|-------|-------------|
+| `servers` | Map of homeserver domain → URL. Required for the bridge to reach the homeserver. |
+| `secrets` | Map of domain → AS token (prefixed with `as_token:`). The bridge uses this to impersonate users. |
+| `allow_discovery` | Whether to allow automatic discovery of homeserver URLs. |
+
+The AS token in `secrets` must match the `as_token` in the bridge's appservice registration. The bridge's registration must also include non-exclusive namespaces for all users that need double puppeting.
+
+### Appservice Registration for Double Puppeting
+
+```yaml
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@mattermost_.+:example\.com'
+    # Non-exclusive: bridge can impersonate for double puppeting
+    - exclusive: false
+      regex: '@admin:example\.com'
+    - exclusive: false
+      regex: '@agent-.+:example\.com'
+```
+
 ## Login Flows
 
 The bridge supports two interactive login methods via the Matrix bot interface:

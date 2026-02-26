@@ -1,0 +1,4 @@
+synapse-data/
+bridge-data/
+logs/
+.env

@@ -1,0 +1,21 @@
+id: mattermost
+url: "http://mautrix-mattermost:29319"
+as_token: test-bridge-as-token
+hs_token: test-bridge-hs-token
+sender_localpart: mattermostbot
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@mattermost_.+:localhost"
+    # Allow bridge to double-puppet as real users (non-exclusive)
+    - exclusive: false
+      regex: "@admin:localhost"
+    - exclusive: false
+      regex: "@ceo:localhost"
+    # Agent users for multi-user double puppeting
+    - exclusive: false
+      regex: "@aiku-.+:localhost"
+  aliases:
+    - exclusive: false
+      regex: "#mattermost_.+:localhost"
